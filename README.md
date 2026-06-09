@@ -31,6 +31,7 @@ Create a `.env` file in the `backend` folder:
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
 GEMINI_API_KEY=your_gemini_api_key
+FRONTEND_URL=http://localhost:5173
 ```
 
 Optional for production:
@@ -88,49 +89,31 @@ http://localhost:3001/api
 - `DELETE /api/history/export` - clear export history
 - `POST /api/ai/generate` - generate outreach content
 
-## Deployment (Fly.io)
+## Deployment (Any Platform)
 
-From the `backend` directory:
+You can deploy this backend on any Node.js hosting provider.
 
-```bash
-fly auth login
-fly launch
+Deployment requirements:
+
+- Runtime: Node.js 18+
+- Start command: `npm start`
+- Exposed port: use `process.env.PORT` (already supported)
+
+Set these environment variables in your hosting dashboard:
+
+```env
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_ANON_KEY=your_supabase_anon_key
+GEMINI_API_KEY=your_gemini_api_key
+FRONTEND_URL=https://your-frontend-domain
+NODE_ENV=production
 ```
 
-When asked:
-
-- App platform: Node.js
-- Internal port: `3001`
-- Managed Postgres: No (this project uses Supabase)
-
-Set secrets:
-
-```bash
-fly secrets set SUPABASE_URL="your_supabase_project_url"
-fly secrets set SUPABASE_ANON_KEY="your_supabase_anon_key"
-fly secrets set GEMINI_API_KEY="your_gemini_api_key"
-fly secrets set NODE_ENV="production"
-```
-
-Deploy:
-
-```bash
-fly deploy
-```
-
-Check logs:
-
-```bash
-fly logs
-```
-
-Your API URL will be:
+After deployment, copy your backend URL and set frontend `VITE_API_URL` to:
 
 ```text
-https://<your-fly-app>.fly.dev/api
+https://<your-backend-domain>/api
 ```
-
-Use that value in frontend as `VITE_API_URL`.
 
 ## Security Notes
 
@@ -140,6 +123,6 @@ Use that value in frontend as `VITE_API_URL`.
 
 ## Troubleshooting
 
-- If Puppeteer fails in cloud runtime, check Fly logs and ensure Chromium dependencies are available.
+- If Puppeteer fails in cloud runtime, check provider logs and ensure Chromium dependencies are available.
 - If auth requests fail, verify `SUPABASE_URL` and `SUPABASE_ANON_KEY` values.
 - If AI endpoint fails, confirm a valid `GEMINI_API_KEY` is set.

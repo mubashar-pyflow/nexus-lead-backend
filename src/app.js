@@ -10,8 +10,20 @@ const aiRoutes = require('./routes/ai.routes');
 
 const app = express();
 
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+
 // Middlewares
-app.use(cors());
+app.use(cors({
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error('CORS not allowed'));
+    }
+}));
 app.use(express.json());
 
 const errorMiddleware = require('./middlewares/error.middleware');
