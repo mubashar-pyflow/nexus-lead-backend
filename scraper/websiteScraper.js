@@ -1,5 +1,52 @@
 const puppeteer = require('puppeteer');
 
+// In-page contact extraction. Expects an already-navigated page and returns
+// emails/socials/phones. Shared by the standalone scanner and the Google Maps
+// lead-enrichment flow so the parsing rules live in one place.
+async function extractContactsFromPage(page) {
+    return page.evaluate(() => {
+        const html = document.documentElement.outerHTML;
+        const text = document.body.innerText;
+
+        // Regex for emails
+        const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi;
+        const rawEmails = html.match(emailRegex) || [];
+
+        // Clean out false positives (e.g., Logo@3x-1.webp, sentry payloads).
+        // Asset filenames with an @ (retina/hashed names) get matched by the
+        // email regex, so reject anything ending in a known asset extension.
+        const assetExt = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|tiff?|css|js|mjs|json|woff2?|ttf|eot|mp4|webm|pdf)$/i;
+        const strictEmails = Array.from(new Set(rawEmails)).filter(e => {
+            const lower = e.toLowerCase();
+            return !assetExt.test(lower) &&
+                   !lower.includes('sentry') &&
+                   !lower.includes('wixpress');
+        });
+
+        // Social media regex searches via href matching
+        const links = Array.from(document.querySelectorAll('a[href]')).map(a => a.href.toLowerCase());
+
+        const socials = {
+            linkedin: links.find(l => l.includes('linkedin.com/company/') || l.includes('linkedin.com/in/')) || null,
+            twitter: links.find(l => l.includes('twitter.com/') || l.includes('x.com/')) || null,
+            facebook: links.find(l => l.includes('facebook.com/') && !l.includes('sharer')) || null,
+            instagram: links.find(l => l.includes('instagram.com/')) || null,
+        };
+
+        // Heuristic phone parsing (optional, supplementing maps)
+        const phoneRegex = /\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}/g;
+        const phonesRaw = text.match(phoneRegex) || [];
+        // Filter realistic phone lengths >= 10 digits stripped
+        const strictPhones = Array.from(new Set(phonesRaw)).filter(p => p.replace(/\D/g, '').length >= 10);
+
+        return {
+            emails: strictEmails,
+            socials: socials,
+            phones: strictPhones.slice(0, 3)
+        };
+    });
+}
+
 async function scrapeWebsite(url) {
     if (!url.startsWith('http')) {
         url = 'https://' + url;
@@ -30,45 +77,7 @@ async function scrapeWebsite(url) {
         // Wait a slight moment for any SPA hydration
         await new Promise(r => setTimeout(r, 1500));
 
-        const extracted = await page.evaluate(() => {
-            const html = document.documentElement.outerHTML;
-            const text = document.body.innerText;
-            
-            // Regex for emails
-            const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi;
-            const rawEmails = html.match(emailRegex) || [];
-            
-            // Clean out false positives (e.g., image.png@2x, sentry payloads)
-            const strictEmails = Array.from(new Set(rawEmails)).filter(e => {
-                const lower = e.toLowerCase();
-                return !lower.endsWith('.png') && 
-                       !lower.endsWith('.jpg') && 
-                       !lower.includes('sentry') &&
-                       !lower.includes('wixpress');
-            });
-
-            // Social media regex searches via href matching
-            const links = Array.from(document.querySelectorAll('a[href]')).map(a => a.href.toLowerCase());
-            
-            const socials = {
-                linkedin: links.find(l => l.includes('linkedin.com/company/') || l.includes('linkedin.com/in/')) || null,
-                twitter: links.find(l => l.includes('twitter.com/') || l.includes('x.com/')) || null,
-                facebook: links.find(l => l.includes('facebook.com/') && !l.includes('sharer')) || null,
-                instagram: links.find(l => l.includes('instagram.com/')) || null,
-            };
-
-            // Heuristic phone parsing (optional, supplementing maps)
-            const phoneRegex = /\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}/g;
-            const phonesRaw = text.match(phoneRegex) || [];
-            // Filter realistic phone lengths >= 10 digits stripped
-            const strictPhones = Array.from(new Set(phonesRaw)).filter(p => p.replace(/\D/g, '').length >= 10);
-
-            return {
-                emails: strictEmails,
-                socials: socials,
-                phones: strictPhones.slice(0, 3) 
-            };
-        });
+        const extracted = await extractContactsFromPage(page);
 
         await browser.close();
         return extracted;
@@ -85,4 +94,4 @@ async function scrapeWebsite(url) {
     }
 }
 
-module.exports = { scrapeWebsite };
+module.exports = { scrapeWebsite, extractContactsFromPage };

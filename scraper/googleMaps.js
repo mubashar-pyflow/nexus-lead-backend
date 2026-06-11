@@ -1,4 +1,5 @@
 const puppeteer = require('puppeteer');
+const { extractContactsFromPage } = require('./websiteScraper');
 
 async function scrapeGoogleMaps(category, location, limit = 5) {
     const query = `${category} in ${location}`;
@@ -111,11 +112,50 @@ async function scrapeGoogleMaps(category, location, limit = 5) {
                 phone: details.phone,
                 address: details.address || 'Address not found',
                 website: details.websiteUrl || biz.website || 'No website',
-                email: 'N/A', // Further deep scrape needed for email
-                socialMedia: 'N/A' 
+                email: 'N/A', // Filled in by the enrichment pass below
+                emails: [],
+                socialMedia: 'N/A'
             });
         }
-        
+
+        // Enrich each lead by visiting its website and extracting emails/socials.
+        // Use a dedicated page with asset blocking so these visits stay fast and
+        // don't interfere with the Maps navigation above.
+        const enrichPage = await browser.newPage();
+        await enrichPage.setRequestInterception(true);
+        enrichPage.on('request', (req) => {
+            if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+
+        for (const biz of detailedResults) {
+            const site = biz.website;
+            if (!site || site === 'No website') continue;
+
+            const target = site.startsWith('http') ? site : `https://${site}`;
+            try {
+                console.log(`Extracting email for ${biz.name} from ${target}...`);
+                await enrichPage.goto(target, { waitUntil: 'domcontentloaded', timeout: 20000 });
+                await delay(800);
+
+                const contact = await extractContactsFromPage(enrichPage);
+                if (contact.emails.length > 0) {
+                    biz.emails = contact.emails;
+                    biz.email = contact.emails[0];
+                }
+                const foundSocials = Object.values(contact.socials).filter(Boolean);
+                if (foundSocials.length > 0) {
+                    biz.socialMedia = foundSocials.join(', ');
+                    biz.socials = contact.socials;
+                }
+            } catch (e) {
+                console.log(`Email enrichment failed for ${biz.name}: ${e.message}`);
+            }
+        }
+
         await browser.close();
         return detailedResults;
         
